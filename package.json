@@ -1,0 +1,35 @@
+{
+  "name": "sdd",
+  "version": "0.1.0",
+  "description": "Spec-Driven Development CLI: task-centric, terminal-only, Claude Agent SDK powered",
+  "bin": {
+    "sdd": "./bin/sdd.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "keywords": [
+    "spec-driven",
+    "sdd",
+    "cli",
+    "agents",
+    "anthropic",
+    "claude",
+    "claude-agent-sdk",
+    "developer-tools"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.111",
+    "js-yaml": "^4.1.0"
+  }
+}

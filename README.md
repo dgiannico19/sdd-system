@@ -2,6 +2,8 @@
 
 CLI de terminal para conducir tareas de software en dos fases: una **fase de specs** (proposal → exploration → design → behavior) que corre con `sdd run` y termina con todos los `.md` del task listos para revisión, y una **fase de build** opcional (`sdd dev` → `sdd review` → `sdd commit` → `sdd archive`) que implementa, audita, planifica commits y archiva. Cada step lo ejecuta un agente de Claude que reporta un verdict (`STEP_PASS` / `STEP_GAP` / `STEP_VETO`).
 
+Las specs son **contrato vivo**: el dev y el reviewer las leen pero **no las modifican**. Si cambiás de idea durante el build, lo decís con `sdd amend "<feedback>"` y el sistema actualiza spec/design/tasks de forma auditable antes de tocar código.
+
 Soporta dos tipos de tarea (`--kind`): **feature** (default, pipeline completo) y **bug** (pipeline reducido que va directo a exploration → behavior → build, sin proposal/design).
 
 Requiere [Claude Code](https://docs.claude.com/en/docs/claude-code) instalado y autenticado en la máquina local. El uso se factura contra la suscripción Pro/Max del propio dev — no necesita API key.
@@ -56,10 +58,13 @@ sdd new "login falla con 500 al expirar token" --kind=bug   # bug — pipeline r
 sdd run                               # corre fase de specs (steps 1→4) hasta el boundary
                                       # → revisás los .md generados, decidís si seguís
 
-sdd dev                               # implementa código
-sdd dev -m "el LoadingSpinner debe reusar <Loader/> existente"   # itera con feedback
+sdd dev                               # implementa código + corre verify (typecheck/lint/build/test)
+sdd dev -m "reusá <Loader/> existente"   # ajuste de implementación (no contradice spec)
 
-sdd review                            # auditoría estricta del código
+sdd amend -m "el botón ahora es verde"   # cambiaste de idea: actualiza specs primero
+sdd dev                               # reimplementa según las nuevas specs
+
+sdd review                            # auditoría estricta del código + verify gate
 sdd commit                            # plan de commits (devuelve add/commit, NO ejecuta)
 # corrés los git add/commit a mano, deployás
 
@@ -92,17 +97,19 @@ Podés cortar después de `sdd run` y trabajar las specs en otro agente — la f
 ### Fase de build (manual, opcional)
 | Comando                          | Qué hace                                                            |
 | -------------------------------- | ------------------------------------------------------------------- |
-| `sdd dev [slug] [-m "..."]`      | Step 5: implementa código y mantiene specs en sync                  |
-| `sdd review [slug] [-m "..."]`   | Step 6: review estricto FSD/calidad/spec-alignment                  |
+| `sdd dev [slug] [-m "..."]`      | Step 5: implementa código según spec/design/tasks. Corre el [verify gate](#verify-gate). **No toca specs.** |
+| `sdd review [slug] [-m "..."]`   | Step 6: review estricto FSD/calidad/drift + verify gate. **No toca specs.** |
+| `sdd amend [slug] -m "..."`      | Actualiza `spec.md` / `design.md` / `tasks.md` / `testing.md` ante un cambio de criterio. Ver [Cuando cambiás de idea](#cuando-cambiás-de-idea-sdd-amend). |
 | `sdd commit [slug] [-m "..."]`   | Step 7: plan de commits (devuelve `git add` + `git commit` separados, NO ejecuta) |
 | `sdd archive [slug]`             | Cierra la tarea: copia `.md` a `.sdd/archive/<slug>/` y borra `.sdd/tasks/<slug>/` |
 
-> Las tres comandos de la fase de build aceptan **feedback inline con `-m "..."`** para iterar sin tocar código a mano. Ver sección [Iterar con feedback](#iterar-con-feedback--m-) más abajo.
+> `dev`, `review` y `commit` aceptan **feedback inline con `-m "..."`** para iterar (ver [Iterar con feedback](#iterar-con-feedback--m-)). Si el feedback **contradice la spec**, el dev devuelve `STEP_GAP` pidiéndote que corras `sdd amend` primero — la spec sigue siendo contrato.
 
 ### Inspección
 | Comando                       | Qué hace                                                            |
 | ----------------------------- | ------------------------------------------------------------------- |
 | `sdd status [slug] [--watch]` | Muestra el avance del pipeline                                      |
+| `sdd explain [slug] [--all]`  | Resume qué hizo el último step: verdict, feedback, verify, tool calls, diff de `src/`. Ver [Retrospectiva](#retrospectiva-sdd-explain). |
 | `sdd list`                    | Lista tareas activas y archivadas                                   |
 
 ---
@@ -122,8 +129,9 @@ Podés cortar después de `sdd run` y trabajar las specs en otro agente — la f
 ### Fase de build (manual)
 | #   | Step                         | Comando         | feature | bug | Notas                          |
 | --- | ---------------------------- | --------------- | :-----: | :-: | ------------------------------ |
-| 5   | `dev-executor`               | `sdd dev`       | ✅      | ✅  | Mantiene specs sincronizadas con el código real |
-| 6   | `strict-reviewer`            | `sdd review`    | ✅      | ✅  | Veto absoluto ante violaciones FSD; sync de specs si quedaron atrasadas |
+| 5   | `dev-executor`               | `sdd dev`       | ✅      | ✅  | Implementa lo que ya está en specs. **No** modifica `spec.md`/`design.md`. Corre [verify gate](#verify-gate) antes de PASS |
+| 6   | `strict-reviewer`            | `sdd review`    | ✅      | ✅  | Veto absoluto ante violaciones FSD, verify roja o drift entre código y spec. **No** modifica specs |
+| —   | `amend` (no-pipeline)        | `sdd amend`     | ✅      | ✅  | Re-edita specs ante cambios de criterio. No avanza el pipeline; te deja posicionado en `dev-executor` para reimplementar |
 | 7   | `commit-splitter`            | `sdd commit`    | ✅      | ✅  | Devuelve `git add` y `git commit` como **comandos separados**, no ejecuta nada |
 | —   | (cierre)                     | `sdd archive`   | ✅      | ✅  | JS puro, sin agente. Mueve a `.sdd/archive/` y borra `.sdd/tasks/<slug>/` |
 
@@ -161,6 +169,12 @@ gates: []
 # Stack y reglas que el agente inyecta como "Project context".
 # sdd init lo llena automáticamente leyendo package.json/tsconfig/go.mod/etc.
 context: ""
+
+# Verify gate: comandos que corren `sdd dev` y `sdd review` antes de aprobar.
+# null  = autodetect de package.json (typecheck, lint, build, test si existen).
+# []    = skip explícito (no recomendado salvo proyectos sin verify).
+# [...] = lista explícita; podés mezclar pnpm/yarn/make/etc.
+verifyCommands: null
 ```
 
 `sdd init` **detecta automáticamente** el stack del proyecto (lee `package.json`, `tsconfig.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`, etc. y la estructura `src/` incluyendo capas FSD) y escribe el resultado en `context`. Lo ves y editás en el yaml.
@@ -172,6 +186,236 @@ sdd init --refresh-context
 ```
 
 Si querés agregar reglas extra (p.ej. "todos los handlers pasan por middleware X"), simplemente editá el campo `context` — lo que pongas reemplaza la detección automática. Si lo dejás vacío, el detector vuelve a actuar al runtime.
+
+---
+
+## Verify gate
+
+`sdd dev` y `sdd review` corren un **gate ejecutivo** antes de aprobar un step. El gate ejecuta los `verifyCommands` configurados (o autodetectados) y degrada `STEP_PASS → STEP_GAP` automáticamente si alguno falla. El verdict deja de depender únicamente de la palabra del agente.
+
+### Cómo se resuelven los comandos
+
+1. Si `verifyCommands` es una lista en `.sdd/config.yaml`, se usa esa.
+2. Si es `null` (default), el motor lee `package.json` y arma la lista con los scripts estándar que existan: `typecheck`, `lint`, `build`, `test`. Cada uno como `npm run <script>`.
+3. Si es `[]`, el gate queda desactivado para ese repo.
+
+### Cómo se ve
+
+```
+▶ código en src/  · 1/2 build · dev-executor
+   reglas: CLAUDE.md, .sdd/rules/coding-style.md
+   verify: npm run typecheck • npm run lint • npm run build • npm test
+
+[…trabajo del agente…]
+
+◇ verify gate (4 comandos)
+  ✓ npm run typecheck
+  ✓ npm run lint
+  ✗ npm run build (exit 2)
+  ✗ npm test (exit 1)
+
+✗ verify falló — el agente declaró PASS pero los comandos están rojos:
+--- npm run build ---
+src/features/login/ui.tsx(40,5): error TS2322: Type '"green"' is not assignable to type '"blue"'.
+
+⚠ gap verify gate falló: npm run build
+```
+
+El step queda en `idle` con verdict `gap`. El historial guarda los exit codes y la duración de cada comando en `state.history[].verify`.
+
+### Doble red de seguridad
+
+- **El agente** corre los comandos durante el dev y los deja verdes (puede leer el output y fixear sobre la marcha).
+- **El motor** los re-ejecuta como gate independiente después de que el agente declare PASS. Si están rojos, el verdict se degrada sin importar lo que diga el agente.
+
+Esto saca al LLM del juicio final. Lo único que el agente puede hacer es entregar verde de verdad.
+
+### Override por proyecto
+
+```yaml
+# .sdd/config.yaml — Next.js + Vitest sin lint
+verifyCommands:
+  - npm run typecheck
+  - npm run build
+  - npm run test:unit -- --run
+```
+
+```yaml
+# Repo Go
+verifyCommands:
+  - go vet ./...
+  - go build ./...
+  - go test ./...
+```
+
+### Truncación
+
+Si el agente alcanza `maxTurnsPerStep` sin emitir verdict, el motor fuerza `STEP_GAP: truncated …` ignorando cualquier `STEP_PASS` heurístico. Antes era posible que `error_max_turns` saliera con un PASS al toque.
+
+---
+
+## Retrospectiva (`sdd explain`)
+
+Después de cada corrida (`run`, `next`, `dev`, `review`, `commit`, `amend`), el motor escribe un **transcript resumido** en `.sdd/tasks/<slug>/transcripts/<timestamp>-<stepId>.md`. Es un `.md` legible por humanos con todo lo necesario para entender qué hizo el agente sin volver a invocarlo.
+
+### Qué contiene el transcript
+
+```md
+# Transcript — dev-executor (pass)
+
+- **task**: exportar usuarios a CSV (`2026-05-08-exportar-csv`)
+- **step**: 5. Dev executor
+- **ranAt**: 2026-05-08T14:22:01.123Z
+- **model**: claude-sonnet-4-5-20250929
+- **usage**: 6 turnos · 8 tools · in 18.4k · cache 13.1k · out 2.7k
+- **promptHash**: `f2a1c0d…`
+
+## Feedback
+reusá <Loader/> de shared/, no crees uno nuevo
+
+## Verify
+| Comando | Resultado |
+|---|---|
+| `npm run typecheck` | ✓ |
+| `npm run lint` | ✓ |
+| `npm run build` | ✓ |
+
+## Tool calls
+- `Read` src/shared/Loader/index.ts
+- `Edit` src/features/login/ui.tsx (return <div>...</div>)
+- `Edit` src/features/login/index.ts
+- `Bash` npm run build
+
+## Resumen del agente
+[último bloque de texto del agente antes del verdict — explica qué hizo y por qué]
+```
+
+Pesa típicamente 1-3 KB por step. Se mueve junto con el resto de los artefactos cuando hacés `sdd archive`.
+
+### `sdd explain`
+
+Para revisar sin abrir archivos:
+
+```bash
+sdd explain                # último step de la tarea activa
+sdd explain <slug>         # último step de un slug específico
+sdd explain --all          # historial completo (resumido por step)
+sdd explain <slug> --all   # combinado
+```
+
+Ejemplo de salida:
+
+```
+Tarea: exportar usuarios a CSV (2026-05-08-exportar-csv)
+status: idle · current step: strict-reviewer
+
+▶ Dev executor · dev-executor  ✓ pass
+  ranAt: 2026-05-08 14:22
+  feedback: reusá <Loader/> de shared/, no crees uno nuevo
+  6 turnos · in 18.4k · cache 13.1k · out 2.7k
+  verify:
+    ✓ npm run typecheck
+    ✓ npm run lint
+    ✓ npm run build
+  transcript: .sdd/tasks/2026-05-08-exportar-csv/transcripts/2026-05-08T14-22-01-123Z-dev-executor.md
+
+Tool calls
+  Read src/shared/Loader/index.ts
+  Edit src/features/login/ui.tsx
+  Edit src/features/login/index.ts
+  Bash npm run build
+
+Resumen del agente
+  [primeras 30 líneas del último bloque de texto del agente]
+
+Cambios en src/ (respecto a HEAD)
+   M src/features/login/ui.tsx
+   A src/features/login/ui.styles.ts
+  ---
+   src/features/login/ui.tsx       | 12 +++++--
+   src/features/login/ui.styles.ts | 18 ++++++++
+```
+
+`--all` muestra cada entrada del `state.history` con su transcript asociado, sin el resumen del agente ni el git diff (para que sea legible).
+
+### Para qué sirve
+
+- **Después de un `pass` raro**: ver qué tools llamó el agente y leer su explicación final.
+- **Después de un `gap` o `veto`**: confirmar qué razón dio y qué tocó antes de pararse.
+- **Antes de `sdd commit`**: revisar el diff y el transcript del dev para preparar el commit.
+- **Auditoría posterior**: los transcripts archivados quedan en `.sdd/archive/<slug>/transcripts/` con todos los pasos de la tarea.
+
+Si no necesitás los transcripts, podés `.gitignore`-ar `.sdd/tasks/*/transcripts/` y `.sdd/archive/*/transcripts/`. El sistema funciona igual sin ellos (sólo `sdd explain` muestra menos detalle).
+
+---
+
+## Cuando cambiás de idea: `sdd amend`
+
+Las specs (`spec.md`, `design.md`, `tasks.md`, `testing.md`) son **contrato**. Ni `sdd dev` ni `sdd review` las modifican — si lo intentan, el step termina en `STEP_VETO`.
+
+Eso te protege del **drift silencioso**: el agente implementa algo distinto a lo que dice la spec, reescribe la spec para que coincida, y nadie ve el cambio. Con la nueva regla, las specs se sincronizan **solo a pedido humano explícito**.
+
+El comando para eso es `sdd amend`:
+
+```bash
+sdd dev                                    # implementó botón azul
+# revisás y querés que sea verde
+
+sdd amend -m "el botón ahora es verde"
+# → actualiza spec.md, design.md, tasks.md, testing.md con cambios mínimos
+# → agrega entrada en `## Amend log` al final de spec.md
+# → te deja posicionado en `dev-executor`
+
+sdd dev                                    # reimplementa según las nuevas specs
+sdd review
+```
+
+### Qué hace exactamente
+
+El step `amend` lee los `.md` actuales y aplica el cambio mínimo:
+
+- **`spec.md`**: ajusta los GIVEN/WHEN/THEN tocados por el feedback. Agrega `## Amend log` con fecha + feedback textual + archivos tocados.
+- **`design.md`**: ajusta la decisión técnica que cambia (color, librería, flujo).
+- **`tasks.md`**: NO desmarca los `[x]` previos (el código ya existe). Suma `[ ]` nuevas para los ajustes que el dev tiene que hacer. Marca `[~]` las pendientes que ya no aplican.
+- **`testing.md`**: ajusta los TC tocados.
+
+No toca `src/`. Después corrés `sdd dev` y se reimplementa contra las nuevas specs.
+
+### `sdd amend` vs `sdd dev -m`
+
+| Caso                                         | Comando                                         |
+| -------------------------------------------- | ----------------------------------------------- |
+| "El botón debe ser verde, no azul"           | `sdd amend -m "..."` (cambia el contrato)       |
+| "Reusá el `<Loader/>` de shared en lugar de crear uno" | `sdd dev -m "..."` (ajuste de implementación) |
+| "Agregá un caso de error timeout"            | `sdd amend -m "..."` (cambia el contrato)       |
+| "Memoizá los handlers con useCallback"       | `sdd dev -m "..."` (no toca lo que la spec promete) |
+| "Cambiá la DB de SQLite a Postgres"          | `sdd amend -m "..."` (cambio de design)         |
+
+Regla simple: **si el feedback tiene que aparecer en `spec.md` o `design.md` para que tenga sentido, es amend**. Si solo cambia cómo se implementó algo que la spec no especifica, es `dev -m`.
+
+Si te equivocás y mandás un cambio de spec por `sdd dev -m`, el dev devuelve:
+```
+⚠ gap feedback contradice spec — corré 'sdd amend "..."' primero
+```
+
+### Cuando `amend` no alcanza
+
+Si el feedback cambia tanto que no es un ajuste sino otro problema (ej: "en realidad no quiero exportar a CSV, quiero un dashboard interactivo"), `amend` devuelve:
+```
+⚠ gap feedback excede amend — replantear desde proposal
+```
+
+Ahí lo correcto es `sdd new "<nuevo título>"` y arrancar otra tarea, o re-correr `sdd run` desde el principio sobre la actual.
+
+### Auditoría
+
+`state.history` registra el amend con verdict, feedback textual, tokens y timestamp. Y la sección `## Amend log` de `spec.md` te da una traza humano-legible:
+
+```
+## Amend log
+- 2026-05-08T14:22:01Z — el botón ahora es verde — archivos: spec.md, design.md, tasks.md, testing.md
+- 2026-05-08T15:10:44Z — agregar caso de timeout en login — archivos: spec.md, testing.md
+```
 
 ---
 
@@ -190,7 +434,8 @@ sdd commit -m "agrupá shared y entities en un solo commit, separá features"
 
 ### Cómo se comporta
 
-- **Prioridad:** si el feedback contradice `tasks.md` / `design.md` / `spec.md`, **gana el feedback**. El agente actualiza esos `.md` para que queden en sync con el cambio (sino la próxima iteración volvería al estado anterior).
+- **Scope:** `-m` es para **ajustes de implementación** que no contradicen la spec (reutilizar componente X, memoizar handlers, cambiar nombre de variable, mejorar mensaje de error). Para cambios que tocan el contrato (color, flujo, alcance), usá [`sdd amend`](#cuando-cambiás-de-idea-sdd-amend).
+- **Si el feedback contradice spec/design:** el dev devuelve `STEP_GAP: feedback contradice spec — corré 'sdd amend "..."' primero`. Las specs son contrato y solo se editan vía `amend`.
 - **Delta, no rewrite:** el prompt instruye explícitamente a aplicar el cambio mínimo y preservar todo lo correcto. No tira el trabajo previo.
 - **Ambigüedad:** si el feedback puede interpretarse de varias formas, el agente devuelve `STEP_GAP: feedback ambiguo — <interpretaciones>` en lugar de adivinar. Refinás y volvés a correr:
   ```bash

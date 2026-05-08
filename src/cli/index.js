@@ -13,15 +13,17 @@ ${c.bold("Fase de specs")}  (steps 1-4: proposal, exploration, design, behavior)
   ${c.cyan("next")}     [slug]            Ejecuta el siguiente step pendiente
 
 ${c.bold("Fase de build")}  (cada uno opcional, podés frenar después de specs)
-  ${c.cyan("dev")}      [slug] [-m "..."] Implementa código según tasks.md (mantiene specs en sync)
-  ${c.cyan("review")}   [slug] [-m "..."] Review estricto del código + actualiza spec si diverge
+  ${c.cyan("dev")}      [slug] [-m "..."] Implementa código según spec/design/tasks (NO toca specs)
+  ${c.cyan("review")}   [slug] [-m "..."] Review estricto + verify gate (NO toca specs)
+  ${c.cyan("amend")}    [slug] -m "..."   Actualiza spec/design/tasks ante un cambio de criterio
   ${c.cyan("commit")}   [slug] [-m "..."] Plan de commits (devuelve git add/commit, no ejecuta)
   ${c.cyan("archive")}  [slug]            Mueve la tarea a .sdd/archive/ y borra .sdd/tasks/<slug>/
 
-  ${c.dim("-m / --feedback : feedback inline para iterar (gana sobre tasks.md/spec.md)")}
+  ${c.dim("-m / --feedback : ajuste de implementación (no contradice spec). Si querés cambiar la spec, usá 'sdd amend'.")}
 
 ${c.bold("Inspección")}
   ${c.cyan("status")}   [slug] [--watch]  Muestra el avance del pipeline
+  ${c.cyan("explain")}  [slug] [--all]    Resume qué hizo el último step (verdict, verify, tools, archivos)
   ${c.cyan("list")}                       Lista tareas activas y archivadas
 
 ${c.bold("Autenticación")}
@@ -40,9 +42,11 @@ const handlers = {
   run: () => require("./run"),
   dev: () => require("./dev"),
   review: () => require("./review"),
+  amend: () => require("./amend"),
   commit: () => require("./commit"),
   archive: () => require("./archive"),
   status: () => require("./status"),
+  explain: () => require("./explain"),
   list: () => require("./list"),
   doctor: () => require("./doctor"),
 };

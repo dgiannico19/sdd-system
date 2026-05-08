@@ -11,6 +11,10 @@ const DEFAULT_CONFIG = {
   maxTokensPerStep: 60000,
   gates: [],
   context: "",
+  // null  = autodetectar scripts estándar de package.json (typecheck, lint, build, test)
+  // []    = skip explícito (no correr verify)
+  // [...] = lista explícita, se ejecuta tal cual (puede mezclar npm/pnpm/make/etc.)
+  verifyCommands: null,
 };
 
 const SDD_DIR = ".sdd";

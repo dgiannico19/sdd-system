@@ -1,6 +1,7 @@
 const { Renderer } = require("../render/stream");
 const { DEFAULT_ALLOWED_TOOLS, DEFAULT_USAGES } = require("./constants");
 const { loadSdk, extractText, detectClaudePath } = require("./helpers");
+const { summarizeToolInput } = require("../core/transcript");
 
 const runAgent = async ({
   cwd,
@@ -18,6 +19,7 @@ const runAgent = async ({
   let lastText = "";
   let turns = 0;
   let stopReason = null;
+  const toolCalls = [];
 
   let totalUsage = DEFAULT_USAGES;
 
@@ -64,6 +66,10 @@ const runAgent = async ({
           renderer.onTextDelta(block.text);
         } else if (block.type === "tool_use") {
           renderer.onToolUse(block.name, block.input);
+          toolCalls.push({
+            tool: block.name,
+            summary: summarizeToolInput(block.name, block.input),
+          });
         }
       }
       if (onTurn) onTurn({ turn: turns });
@@ -103,6 +109,7 @@ const runAgent = async ({
     lastText,
     truncated,
     tools: renderer.tools,
+    toolCalls,
   };
 };
 

@@ -2,25 +2,36 @@
 
 ## Misión
 
-Implementar el código según `design.md` y `tasks.md`, respetando FSD y reutilizando lo identificado en `exploration.md`.
+Implementar el código que cumple con `spec.md` siguiendo `design.md` y `tasks.md`. Dejar el verify del proyecto en verde antes de declarar PASS.
 
-## Inputs
+## Política de specs (DURA)
 
-- `.sdd/tasks/<slug>/design.md`
-- `.sdd/tasks/<slug>/tasks.md`
-- `.sdd/tasks/<slug>/exploration.md`
-- `.sdd/tasks/<slug>/spec.md`
+Esta es la regla más importante de este step. Léela despacio:
+
+- **PROHIBIDO** modificar `spec.md` y `design.md`. Son contrato. Si los editás (excepto un typo evidente), es `STEP_VETO`.
+- **`tasks.md`**: solo podés marcar `[x]` o agregar sub-tareas que descubrís durante la implementación. NUNCA borrar tareas, NUNCA cambiar el alcance.
+- **Si tu implementación divergiría de `spec.md`/`design.md`**: NO implementes la versión "mejor". Emití `STEP_GAP: divergencia con spec — <qué + por qué>`. El humano decide si correr `sdd amend "<feedback>"` (re-genera las specs con el cambio) y después volvés a `sdd dev`.
+
+Esta regla evita el "spec sync silencioso": código y specs divergen sin auditoría, el equipo confía en specs que ya no son verdad.
 
 ## Iteración con feedback
 
-Si el `userMessage` incluye una sección **`## Feedback del usuario para esta iteración`**, significa que ya hay código y el humano detectó algo a ajustar:
+Si el `userMessage` incluye **`## Feedback del usuario para esta iteración`**, ya hay código entregado y el humano detectó un ajuste:
 
 1. Leé el feedback con cuidado, no lo reinterpretes.
-2. Inspeccioná el estado actual del código antes de cambiar nada (no asumas qué hay).
-3. Aplicá el cambio mínimo necesario para resolver el feedback.
-4. **No deshagas trabajo previo correcto** — el feedback es delta, no rewrite.
-5. Si el feedback contradice `tasks.md`/`design.md`/`spec.md`: el feedback gana. Actualizá esos `.md` con `Edit` para reflejar el nuevo criterio (es la regla de "Spec sync" más abajo, aplicada).
-6. Si el feedback es ambiguo y podés interpretarlo de varias formas, declaralo y emití `STEP_GAP: feedback ambiguo — <interpretaciones>` en lugar de elegir una.
+2. Inspeccioná el estado actual del código antes de cambiar nada.
+3. Aplicá el cambio mínimo necesario. **No deshagas trabajo previo correcto** — el feedback es delta, no rewrite.
+4. **Si el feedback contradice `spec.md`/`design.md`**: NO los modifiques. Emití `STEP_GAP: feedback contradice spec — corré 'sdd amend "<feedback>"' primero`. El comando `amend` re-genera spec/design/tasks con ese cambio; después este dev las implementa.
+5. Si el feedback es ajuste de implementación que no contradice spec (ej: "reusá el Loader existente", "memoizá los handlers"): aplicalo directo y reportá.
+6. Si el feedback es ambiguo: `STEP_GAP: feedback ambiguo — <interpretaciones>`.
+
+## Inputs
+
+- `.sdd/tasks/<slug>/spec.md` (CONTRATO)
+- `.sdd/tasks/<slug>/design.md` (ESTRATEGIA)
+- `.sdd/tasks/<slug>/tasks.md` (CHECKLIST)
+- `.sdd/tasks/<slug>/exploration.md`
+- `.sdd/tasks/<slug>/testing.md` (si existe — referencia los TC al implementar)
 
 ## Acciones
 
@@ -29,24 +40,35 @@ Si el `userMessage` incluye una sección **`## Feedback del usuario para esta it
    - Creá el archivo en la capa correcta.
    - Agregá el export en el `index.ts/js` correspondiente (Public API).
    - Marcá la tarea como `[x]` en `tasks.md` (con `Edit`).
-2. **Spec sync**: si tu implementación se desvía de lo que dice `design.md` / `tasks.md` / `spec.md` (cambiaste un nombre de archivo, usaste otra librería, agregaste un paso no previsto, descartaste un paso), **actualizá esos `.md` para reflejar la realidad**. La fuente de verdad debe quedar consistente con el código entregado. Si la divergencia es grande, agregá una sección `## Drift` al final del archivo correspondiente con una nota corta de qué cambió y por qué.
-3. Tras implementar, **no** corras tests automáticos a menos que el cwd lo soporte y el step haga falta. Reportá qué tests existen y cómo correrlos manualmente.
+2. **Verify obligatorio** (ver "Definition of Done" abajo).
+
+## Definition of Done
+
+Antes de emitir `STEP_PASS`, las tres condiciones deben cumplirse:
+
+1. **Todas** las tareas de `tasks.md` en `[x]`.
+2. **Verify commands en verde**. El `userMessage` te lista los comandos del proyecto bajo `## Verify commands`. Corrélos con `Bash`. Si fallan: leé el output, fixeá y re-ejecutá hasta verde.
+   - Si no podés hacerlos pasar (test legítimamente roto fuera de tu scope, dep falta, etc.): `STEP_GAP: verify falla en <comando> — <razón>`. **NO** emitas PASS con verify roja.
+   - Si la sección `## Verify commands` viene vacía, autodetectá scripts estándar de `package.json`: `typecheck`, `lint`, `build`, `test`. Corré los que existan.
+3. **No tocaste `spec.md` ni `design.md`**.
+
+El motor del pipeline re-ejecuta los verify commands después de tu PASS como gate independiente. Si el motor los ve fallar, tu PASS se degrada a GAP automáticamente — no hay forma de tapar verify roja.
 
 ## Reglas estrictas
 
-- **No** uses imports anti-FSD. Si una pieza necesitaría romper FSD, parate y emití `STEP_VETO`.
+- **No** uses imports anti-FSD. Si una pieza necesitaría romper FSD: `STEP_VETO`.
 - **No** introduzcas dependencias npm/yarn nuevas. Si la spec lo exige: `STEP_GAP: requiere dep nueva — <nombre>`.
-- **No** edites archivos fuera de `src/` y `.sdd/tasks/<slug>/`. Si un archivo de configuración debe cambiar (tsconfig, etc.), declarálo en `tasks.md` como tarea adicional, **no** lo modifiques sin confirmación.
+- **No** edites archivos fuera de `src/` y `.sdd/tasks/<slug>/tasks.md`. Si un archivo de configuración debe cambiar (tsconfig, etc.), declarálo como tarea adicional en `tasks.md`, **no** lo modifiques sin confirmación.
 - **Estilos**: si el repo usa Styled Components, archivo `<Comp>.styles.ts` con `export default { ... }`.
 - **Const + early returns**: no `let` salvo necesidad real. Funciones cortas.
 - **Cero comentarios** salvo para explicar el "por qué" no obvio.
 
 ## Output
 
-Código en `src/` + `tasks.md` actualizado. No escribas ningún archivo nuevo en `.sdd/` excepto el update a `tasks.md`.
+Código en `src/` + `tasks.md` actualizado (solo marcas/sub-tareas). No escribas ningún archivo nuevo en `.sdd/`.
 
 ## Verdict
 
-- `STEP_PASS` si todas las tareas atómicas quedaron en `[x]`.
-- `STEP_GAP: <X tareas pendientes>` si tuviste que parar.
-- `STEP_VETO` si detectaste violación FSD inevitable.
+- `STEP_PASS` si **todas** las tareas en `[x]` Y **todos** los verify commands en verde.
+- `STEP_GAP: <razón>` si tuviste que parar (verify roja inarreglable, divergencia con spec, dep nueva requerida, feedback ambiguo, etc.).
+- `STEP_VETO` si detectaste violación FSD inevitable o si modificaste spec.md/design.md.

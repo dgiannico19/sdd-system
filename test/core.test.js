@@ -34,6 +34,18 @@ test("verdict parser recognizes pass/gap/veto", () => {
   assert.equal(parseVerdict("blah").verdict, "error");
 });
 
+test("verdict parser tolerates markdown emphasis around the token", () => {
+  assert.equal(parseVerdict("ok\n**STEP_PASS**").verdict, "pass");
+  assert.equal(parseVerdict("ok\n__STEP_PASS__").verdict, "pass");
+  assert.equal(parseVerdict("ok\n`STEP_PASS`").verdict, "pass");
+  const boldGap = parseVerdict("texto\n**STEP_GAP**: falta design.md");
+  assert.equal(boldGap.verdict, "gap");
+  assert.equal(boldGap.reason, "falta design.md");
+  const boldVeto = parseVerdict("texto\n**STEP_VETO: viola FSD**");
+  assert.equal(boldVeto.verdict, "veto");
+  assert.equal(boldVeto.reason, "viola FSD");
+});
+
 test("pickNext returns first uncompleted step", () => {
   const fresh = { history: [], status: "idle", currentStepId: firstStep().id };
   assert.equal(pickNext(fresh).id, "proposal-initiator");

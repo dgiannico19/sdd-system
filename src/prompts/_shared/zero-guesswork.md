@@ -65,10 +65,12 @@ Antes de escribir artefactos importantes, mostrá brevemente:
 
 ## 8. Verdict obligatorio
 
-**Tu última línea de texto debe ser exactamente uno de estos tokens** (sin backticks, sin texto extra después):
+**Tu última línea de texto debe ser exactamente uno de estos tokens** (sin backticks, sin asteriscos/markdown, sin negrita, sin texto extra después):
 
 - `STEP_PASS` — el step se completó. Todos los artefactos esperados existen y son consistentes.
 - `STEP_GAP: <razón breve>` — falta información o input. El humano debe intervenir.
 - `STEP_VETO: <razón breve>` — el step propuso o detectó una violación crítica (FSD u otra). El pipeline se detiene.
+
+Escribilo en texto plano, sin formato. Ejemplo correcto: `STEP_PASS` (no `**STEP_PASS**`, no `` `STEP_PASS` ``).
 
 Sin verdict, el motor lo cuenta como `error` y aborta.

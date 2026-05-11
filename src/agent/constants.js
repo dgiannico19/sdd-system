@@ -15,9 +15,10 @@ const DEFAULT_USAGES = {
 };
 
 const VERDICTS = ["pass", "gap", "veto"];
-const PASS_RE = /^\s*STEP_PASS\s*$/m;
-const GAP_RE = /^\s*STEP_GAP\s*:?\s*(.*)$/m;
-const VETO_RE = /^\s*STEP_VETO\s*:?\s*(.*)$/m;
+const EMPH = "[*_`]{0,2}";
+const PASS_RE = new RegExp(`^\\s*${EMPH}\\s*STEP_PASS\\s*${EMPH}\\s*$`, "m");
+const GAP_RE = new RegExp(`^\\s*${EMPH}\\s*STEP_GAP\\s*${EMPH}\\s*:?\\s*(.*?)\\s*${EMPH}\\s*$`, "m");
+const VETO_RE = new RegExp(`^\\s*${EMPH}\\s*STEP_VETO\\s*${EMPH}\\s*:?\\s*(.*?)\\s*${EMPH}\\s*$`, "m");
 
 module.exports = {
   DEFAULT_ALLOWED_TOOLS,
